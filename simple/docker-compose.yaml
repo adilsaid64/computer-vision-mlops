@@ -5,7 +5,8 @@ services:
     build: ./rtsp-server
     networks:
       - app-network
-      
+    ports:
+      - "8554:8554"
   camera-simulator:
     build: ./camera-simulator
     networks:
