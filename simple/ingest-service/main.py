@@ -1,6 +1,6 @@
 import cv2
 
-RTSP_URL = "rtsp://localhost:8554/camera1"
+RTSP_URL = "rtsp://localhost:8554/camera1?rtsp_transport=tcp"
 cap = cv2.VideoCapture(RTSP_URL, cv2.CAP_FFMPEG)
 if not cap.isOpened():
     raise RuntimeError("Cannot open RTSP stream")
