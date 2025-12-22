@@ -1,0 +1,17 @@
+version: '3'
+
+services:
+  rtsp-server:
+    build: ./rtsp-server
+    networks:
+      - app-network
+      
+  camera-simulator:
+    build: ./camera-simulator
+    networks:
+      - app-network
+    depends_on:
+      - rtsp-server
+networks:
+  app-network:
+    driver: bridge
