@@ -1,1 +1,0 @@
-FROM bluenviron/mediamtx:latest
