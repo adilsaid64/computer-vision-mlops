@@ -1,47 +1,46 @@
 import cv2
-from fastapi import FastAPI
-from fastapi.responses import Response
-import requests
 import time
+import logging
 
-app = FastAPI()
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 
-RTSP_URL = "rtsp://localhost:8554/camera1?rtsp_transport=tcp"
-INFER_URL = "http://localhost:8000/infer"
+logger = logging.getLogger(__name__)
+
+RTSP_URL = "rtsp://localhost:8554/camera1"
 
 class RTSPClient:
-    def __init__(self, rtsp_url:str, wait_time:float):
+    def __init__(self, rtsp_url: str):
         self.rtsp_url = rtsp_url
-        self.wait_time = wait_time
         self.cap = None
 
     def connect(self):
         self.cap = cv2.VideoCapture(self.rtsp_url, cv2.CAP_FFMPEG)
-        if self.cap.isOpened():
-            print('connected')
-        else:
-            raise RuntimeError('can not connected to rtsp stream')
+        if not self.cap.isOpened():
+            raise RuntimeError("Cannot connect to RTSP stream")
+        logger.info("Connected")
 
     def get_frame(self):
-        if self.cap:
-            ret, frame = self.cap.read()
-            sucess,encoded = cv2.imencode('.jpg', frame)
-            return encoded.tobytes()
-        else:
+        if self.cap is None:
             return None
 
+        ret, frame = self.cap.read()
+        if not ret:
+            logger.warning("Failed to read frame")
+            return None
 
-def get_inference(jpeg_bytes: bytes) -> dict[str, int]:
-    files = {"file": ("frame.jpg", jpeg_bytes, "image/jpeg")}
-    r = requests.post(INFER_URL, files=files, timeout=5)
-    return r.json()
+        return frame
+    
+if __name__ == "__main__":
+    
+    rtsp_client = RTSPClient(RTSP_URL)
+    rtsp_client.connect()
 
-
-rtsp_client = RTSPClient(rtsp_url=RTSP_URL, wait_time=1)
-rtsp_client.connect()
-
-while True:
-    jpeg_bytes = rtsp_client.get_frame()
-    r = get_inference(jpeg_bytes)
-    print(r)
-    time.sleep(1)
+    while True:
+        frame = rtsp_client.get_frame()
+        if frame is None:
+            continue
+        logger.info("Frame shape: %s", frame.shape)
+        time.sleep(1)
