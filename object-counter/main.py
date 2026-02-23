@@ -4,6 +4,7 @@ import logging
 import numpy as np
 from collections import deque
 import threading
+from ultralytics import YOLO
 
 logging.basicConfig(
     level=logging.INFO,
@@ -11,6 +12,10 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+model = YOLO("yolov8n.pt")
+
+VEHICLE_CLASSES = {"car", "truck", "bus", "motorcycle"}
 
 RTSP_URLS = {"camera1": "rtsp://localhost:8554/camera1"}
 
@@ -52,10 +57,44 @@ def capture_loop(stream_id: str, rtsp_url: str):
             continue
         stream_buffers[stream_id].append(frame)
 
+
+def inference_loop():
+    logger.info("Inference thread started")
+
+    while True:
+        frames = []
+        stream_ids = []
+
+        for stream_id, buffer in stream_buffers.items():
+            if buffer:
+                frames.append(buffer[-1])
+                stream_ids.append(stream_id)
+
+        if not frames:
+            time.sleep(0.01)
+            continue
+
+        results = model(frames, verbose=False)
+
+        # Process results per stream
+        for stream_id, result in zip(stream_ids, results):
+            count = 0
+            detections = []
+
+            for box in result.boxes:
+                cls_name = model.names[int(box.cls[0])]
+                if cls_name in VEHICLE_CLASSES:
+                    count += 1
+                    detections.append({
+                        "class": cls_name,
+                        "confidence": float(box.conf[0])
+                    })
+
+            logger.info(f"{stream_id}: {count} vehicles")
+
+
 if __name__ == "__main__":
     
-    # Testing out how this woould work, so there is one main process
-    # but each rtsp client gets its own thread
     for stream_id, url in RTSP_URLS.items():
         thread = threading.Thread(
             target=capture_loop,
@@ -63,3 +102,13 @@ if __name__ == "__main__":
             daemon=True,
         )
         thread.start()
+
+    infer_thread = threading.Thread(
+        target=inference_loop,
+        daemon=True,
+    )
+    infer_thread.start()
+
+
+    while True:
+        time.sleep(1)
