@@ -7,12 +7,37 @@ services:
       - app-network
     ports:
       - "8554:8554"
-  camera-simulator:
+
+  camera-simulator-1:
     build: ./camera-simulator
     networks:
       - app-network
     depends_on:
       - rtsp-server
+    command: [
+      "-re",
+      "-stream_loop","-1",
+      "-i","/videos/traffic.mp4",
+      "-c","copy",
+      "-f","rtsp",
+      "rtsp://rtsp-server:8554/camera1"
+    ]
+
+  camera-simulator-2:
+    build: ./camera-simulator
+    networks:
+      - app-network
+    depends_on:
+      - rtsp-server
+    command: [
+      "-re",
+      "-stream_loop","-1",
+      "-i","/videos/traffic2.mp4",
+      "-c","copy",
+      "-f","rtsp",
+      "rtsp://rtsp-server:8554/camera2"
+    ]
+
 networks:
   app-network:
     driver: bridge

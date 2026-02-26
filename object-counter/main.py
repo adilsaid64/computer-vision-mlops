@@ -17,7 +17,10 @@ model = YOLO("yolov8n.pt")
 
 VEHICLE_CLASSES = {"car", "truck", "bus", "motorcycle"}
 
-RTSP_URLS = {"camera1": "rtsp://localhost:8554/camera1"}
+RTSP_URLS = {
+    "camera1": "rtsp://localhost:8554/camera1", 
+    "camera2": "rtsp://localhost:8554/camera2",
+}
 
 stream_buffers = {
     stream_id: deque(maxlen=1)
