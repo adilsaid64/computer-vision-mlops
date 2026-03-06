@@ -3,9 +3,11 @@ import time
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 
 import numpy as np
 from ultralytics import YOLO
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -14,19 +16,30 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+
 MODEL_PATH = "yolov8n.pt"
 
 INFERENCE_FPS = 10
 RECONNECT_DELAY = 5
+MAX_FRAME_AGE = 2.0  # seconds before a frame is considered stale
 
 VEHICLE_CLASSES = {"car", "truck", "bus", "motorcycle"}
+
 
 RTSP_URLS: dict[str, str] = {
     "camera1": "rtsp://localhost:8554/camera1",
     "camera2": "rtsp://localhost:8554/camera2",
 }
 
+
 Frame = np.ndarray
+
+
+@dataclass
+class FramePacket:
+    frame: Frame
+    timestamp: float
+
 
 class FrameStore:
     """
@@ -35,33 +48,36 @@ class FrameStore:
 
     def __init__(self, stream_ids: list[str]):
 
-        self._frames: dict[str, Frame | None] = {
+        self._frames: dict[str, FramePacket | None] = {
             stream_id: None for stream_id in stream_ids
         }
 
         self._lock = threading.Lock()
 
-    def update(self, stream_id: str, frame: Frame) -> None:
+    def update(self, stream_id: str, packet: FramePacket) -> None:
 
         with self._lock:
-            self._frames[stream_id] = frame
+            self._frames[stream_id] = packet
 
-    def get_batch(self) -> tuple[list[str], list[Frame]]:
+    def get_batch(self):
 
         frames: list[Frame] = []
         stream_ids: list[str] = []
+        timestamps: list[float] = []
 
         with self._lock:
 
-            for stream_id, frame in self._frames.items():
+            for stream_id, packet in self._frames.items():
 
-                if frame is None:
+                if packet is None:
                     continue
 
-                frames.append(frame)
+                frames.append(packet.frame)
                 stream_ids.append(stream_id)
+                timestamps.append(packet.timestamp)
 
-        return stream_ids, frames
+        return stream_ids, frames, timestamps
+
 
 class RTSPWorker:
 
@@ -108,7 +124,12 @@ class RTSPWorker:
                 self.connect()
                 continue
 
-            self.frame_store.update(self.stream_id, frame)
+            packet = FramePacket(
+                frame=frame,
+                timestamp=time.monotonic(),
+            )
+
+            self.frame_store.update(self.stream_id, packet)
 
 
 class InferenceEngine:
@@ -125,9 +146,19 @@ class InferenceEngine:
 
         self.interval = 1 / inference_fps
 
-    def process_results(self, stream_ids, results) -> None:
+    def process_results(self, stream_ids, results, timestamps) -> None:
 
-        for stream_id, result in zip(stream_ids, results):
+        now = time.monotonic()
+
+        for stream_id, result, ts in zip(stream_ids, results, timestamps):
+
+            frame_age = now - ts
+
+            if frame_age > MAX_FRAME_AGE:
+                logger.warning(
+                    f"{stream_id}: skipping stale frame age={frame_age:.2f}s"
+                )
+                continue
 
             vehicle_count = 0
 
@@ -138,7 +169,9 @@ class InferenceEngine:
                 if cls_name in VEHICLE_CLASSES:
                     vehicle_count += 1
 
-            logger.info(f"{stream_id}: {vehicle_count} vehicles")
+            logger.info(
+                f"{stream_id}: {vehicle_count} vehicles | latency={frame_age:.2f}s"
+            )
 
     def run(self) -> None:
 
@@ -146,17 +179,18 @@ class InferenceEngine:
 
         while True:
 
-            start = time.time()
+            start = time.monotonic()
 
-            stream_ids, frames = self.frame_store.get_batch()
+            stream_ids, frames, timestamps = self.frame_store.get_batch()
 
             if frames:
 
                 results = self.model(frames, verbose=False)
 
-                self.process_results(stream_ids, results)
+                self.process_results(stream_ids, results, timestamps)
 
-            elapsed = time.time() - start
+            elapsed = time.monotonic() - start
+
             time.sleep(max(0, self.interval - elapsed))
 
 
@@ -206,6 +240,7 @@ class ObjectCounterService:
 
         while True:
             time.sleep(1)
+
 
 def main() -> None:
 
